@@ -78,37 +78,19 @@ cv::Vec3b hsv2bgr(int h, float s, float v) {
   v *= 255;
   switch (ti) {
     case 0:
-      r = v;
-      g = n;
-      b = l;
-      break;
+      return cv::Vec3b(l, n, v);
     case 1:
-      r = m;
-      g = v;
-      b = l;
-      break;
+      return cv::Vec3b(l, v, m);
     case 2:
-      r = l;
-      g = v;
-      b = n;
-      break;
+      return cv::Vec3b(n, v, l);
     case 3:
-      r = l;
-      g = m;
-      b = v;
-      break;
+      return cv::Vec3b(v, m, l);
     case 4:
-      r = n;
-      g = l;
-      b = v;
-      break;
+      return cv::Vec3b(v, l, n);
+    default:
     case 5:
-      r = v;
-      g = l;
-      b = m;
-      break;
+      return cv::Vec3b(m, l, v);
   }
-  return cv::Vec3b(b, g, r);
 }
 
 void julia(cv::Mat& img) {
