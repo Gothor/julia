@@ -7,7 +7,10 @@
 #define IMG_W 1024
 #define IMG_H 1024 //768
 #define MAX_NORM 4        // 2
+#define STEP 0.05
 
+long double offsetLeft = 0.0;
+long double offsetTop = 0.0;
 long double limitLeft = -1.0;
 long double limitRight = 1.0;
 long double limitTop = -1.0;
@@ -52,8 +55,8 @@ long double module_complex(complex c) {
 
 complex convert(int x, int y) {
    return new_complex(
-        ((long double) x / IMG_W * (limitRight - limitLeft)) * zoom + limitLeft * zoom,
-        ((long double) y / IMG_H * (limitBottom - limitTop)) * zoom + limitTop * zoom);
+        ((long double) x / IMG_W * (limitRight - limitLeft) + limitLeft) * zoom + offsetLeft,
+        ((long double) y / IMG_H * (limitBottom - limitTop) + limitTop) * zoom + offsetTop);
 }
 
 int juliaDot(complex z, int iter) {
@@ -193,20 +196,16 @@ int main(int argc, char * argv[]) {
 
         if( (key = cv::waitKey(30)) != -1) {
           if (key == 81) { // Left key
-            limitLeft -= 0.1 * zoom;
-            limitRight -= 0.1 * zoom;
+            offsetLeft -= STEP * zoom;
           }
           else if (key == 83) { // Right key
-            limitLeft += 0.1 * zoom;
-            limitRight += 0.1 * zoom;
+            offsetLeft += STEP * zoom;
           }
           else if (key == 82) { // Up key
-            limitTop -= 0.1;
-            limitBottom -= 0.1;
+            offsetTop -= STEP * zoom;
           }
           else if (key == 84) { // Down key
-            limitTop += 0.1;
-            limitBottom += 0.1;
+            offsetTop += STEP * zoom;
           }
           else if (key == 'r' && maxIter > 10) {
             maxIter -= 10;
@@ -221,16 +220,16 @@ int main(int argc, char * argv[]) {
             zoom *= 0.5;
           }
           else if (key == 'z') {
-            c.imag += 0.1;
+            c.imag += STEP;
           }
           else if (key == 's') {
-            c.imag -= 0.1;
+            c.imag -= STEP;
           }
           else if (key == 'd') {
-            c.real += 0.1;
+            c.real += STEP;
           }
           else if (key == 'q') {
-            c.real -= 0.1;
+            c.real -= STEP;
           }
           else if (key == 27) { // Escape
             keepGoing = false;
