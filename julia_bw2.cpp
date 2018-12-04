@@ -110,29 +110,39 @@ int nbPartsPerThread = 1;
 int nbParts = 1;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 int nextPart = 0;
 cv::Mat newImg(IMG_H, IMG_W, CV_8UC3, cv::Vec3b(0,0,0));
 int partSize = 0;
+bool keepGoing = true;
 
 void* child(void *arg) {
     // cv::Mat& img = newImg;
 
     pthread_mutex_lock(&mutex);
-    while (nextPart < nbParts) {
-        int part = nextPart++;
+    while(1) {
+      int part;
+      while (nextPart >= nbParts && keepGoing) {
+        pthread_cond_wait(&cond, &mutex);
+      }
+
+      if (!keepGoing) {
         pthread_mutex_unlock(&mutex);
+        return NULL;
+      }
 
-        for (int i = part * partSize; i < IMG_H * IMG_W && i < (part + 1) * partSize; i++) {
-            int x = i % IMG_W;
-            int y = i / IMG_W;
+      part = nextPart++;
+      pthread_mutex_unlock(&mutex);
 
-            int j = juliaDot(convert(x, y), maxIter);
-            // cv::Vec3b color(j, 255, 255);
-            cv::Vec3b color = hsv2bgr((j * 360) / 255, 1.0, 1.0);
-            newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
-        }
+      // printf("On travaille ! (%d)\n", part);
+      for (int i = part * partSize; i < IMG_H * IMG_W && i < (part + 1) * partSize; i++) {
+          int x = i % IMG_W;
+          int y = i / IMG_W;
 
-        pthread_mutex_lock(&mutex);
+          int j = juliaDot(convert(x, y), maxIter);
+          cv::Vec3b color = hsv2bgr((j * 360) / 255, 1.0, 1.0);
+          newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
+      }
     }
     pthread_mutex_unlock(&mutex);
 
@@ -167,85 +177,76 @@ int main(int argc, char * argv[]) {
     }
     partSize /= nbParts;
     
-    pthread_t tid[nbThreads];
-
     c = new_complex(reel, imag);
-    bool keepGoing = true;
-    while (keepGoing) {
-      printf("%Lf, %Lf\n", c.real, c.imag);
-        nextPart = 0;
-        for (int j = 0; j < nbThreads; j++) {
-            pthread_create(&tid[j], NULL, child, NULL);
-        }
 
-        for (int j = 0; j < nbThreads; j++) {
-            pthread_join(tid[j], NULL);
-        }
+    pthread_t tid[nbThreads];
+    for (int j = 0; j < nbThreads; j++) {
+        pthread_create(&tid[j], NULL, child, NULL);
+    }
+
+    while (keepGoing) {
+      // printf("%Lf, %Lf\n", c.real, c.imag);
 
         // cv::cvtColor(newImg, newImg, cv::COLOR_HSV2BGR);
         imshow("image", newImg); // met à jour l'image
         int key = -1; // -1 indique qu'aucune touche est enfoncée
 
-        while( (key = cv::waitKey(30)) ) {
+        if( (key = cv::waitKey(30)) != -1) {
           if (key == 81) { // Left key
             limitLeft -= 0.1 * zoom;
             limitRight -= 0.1 * zoom;
-            break;
           }
-          if (key == 83) { // Right key
+          else if (key == 83) { // Right key
             limitLeft += 0.1 * zoom;
             limitRight += 0.1 * zoom;
-            break;
           }
-          if (key == 82) { // Up key
+          else if (key == 82) { // Up key
             limitTop -= 0.1;
             limitBottom -= 0.1;
-            break;
           }
-          if (key == 84) { // Down key
+          else if (key == 84) { // Down key
             limitTop += 0.1;
             limitBottom += 0.1;
-            break;
           }
-          if (key == 'r' && maxIter > 10) {
+          else if (key == 'r' && maxIter > 10) {
             maxIter -= 10;
-            break;
           }
-          if (key == 'f') {
+          else if (key == 'f') {
             maxIter += 10;
-            break;
           }
-          if (key == 'a') {
+          else if (key == 'a') {
             zoom /= 0.5;
-            break;
           }
-          if (key == 'e') {
+          else if (key == 'e') {
             zoom *= 0.5;
-            break;
           }
-          if (key == 'z') {
+          else if (key == 'z') {
             c.imag += 0.1;
-            break;
           }
-          if (key == 's') {
+          else if (key == 's') {
             c.imag -= 0.1;
-            break;
           }
-          if (key == 'd') {
+          else if (key == 'd') {
             c.real += 0.1;
-            break;
           }
-          if (key == 'q') {
+          else if (key == 'q') {
             c.real -= 0.1;
-            break;
           }
-          if (key == 27) { // Escape
+          else if (key == 27) { // Escape
             keepGoing = false;
-            break;
           }
+          pthread_mutex_lock(&mutex);
+          nextPart = 0;
+          pthread_cond_broadcast(&cond);
+          pthread_mutex_unlock(&mutex);
         }
     }
     cvDestroyWindow("image"); // ferme la fenêtre
+
+    pthread_cond_broadcast(&cond);
+    for (int j = 0; j < nbThreads; j++) {
+        pthread_join(tid[j], NULL);
+    }
 
     return 0;
 }
