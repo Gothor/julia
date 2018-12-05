@@ -6,7 +6,7 @@ RM = rm -f
 PROG = julia_bw2
 SRC = $(PROG:%=%.cpp)
 OBJ = $(PROG:%=%.o)
-EXTERNALS = image_bw0.bmp image_bw1.bmp image_bw2.bmp image_bw3.bmp
+EXTERNALS = palettes.h
 
 all: $(PROG)
 

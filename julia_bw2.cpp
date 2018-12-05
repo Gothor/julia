@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <opencv2/opencv.hpp>
 #include <pthread.h>
+#include <time.h>
+#include "palettes.h" // Contient les palettes (attention, c'est brut...)
 
 /* CONSTANTES *****************************************************************/
 
@@ -8,6 +10,29 @@
 #define IMG_H 1024 //768
 #define MAX_NORM 4        // 2
 #define STEP 0.05
+
+/* GLOBALES *******************************************************************/
+
+typedef enum {
+  HUE = 0,
+  BLACK_AND_WHITE,
+  PALETTE1,
+  PALETTE2,
+  COLOR_MODES
+} color_mode_t;
+
+int nbThreads = 1;
+int nbPartsPerThread = 1;
+int nbParts = 1;
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int nextPart = 0;
+cv::Mat newImg(IMG_H, IMG_W, CV_8UC3, cv::Vec3b(0,0,0));
+int partSize = 0;
+bool keepGoing = true;
+int offsetColor = 0;
+color_mode_t colorMode = HUE;
 
 long double offsetLeft = 0.0;
 long double offsetTop = 0.0;
@@ -71,6 +96,18 @@ int juliaDot(complex z, int iter) {
     return i * 255 / iter; // on met i dans l'intervalle 0 à 255
 }
 
+void julia(cv::Mat& img) {
+    for (int x = 0; x < IMG_W; x++) {
+        for (int y = 0; y < IMG_H; y++) {
+            int j = juliaDot(convert(x, y), maxIter);
+            cv::Vec3b color(j, j, j);
+            img.at<cv::Vec3b>(cv::Point(x, y)) = color;
+        }
+    }
+}
+
+/* MAIN ***********************************************************************/
+
 cv::Vec3b hsv2bgr(int h, float s, float v) {
   int r, g, b;
   int ti = (h / 60) % 6;
@@ -96,32 +133,7 @@ cv::Vec3b hsv2bgr(int h, float s, float v) {
   }
 }
 
-void julia(cv::Mat& img) {
-    for (int x = 0; x < IMG_W; x++) {
-        for (int y = 0; y < IMG_H; y++) {
-            int j = juliaDot(convert(x, y), maxIter);
-            cv::Vec3b color(j, j, j);
-            img.at<cv::Vec3b>(cv::Point(x, y)) = color;
-        }
-    }
-}
-
-/* MAIN ***********************************************************************/
-
-int nbThreads = 1;
-int nbPartsPerThread = 1;
-int nbParts = 1;
-
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-int nextPart = 0;
-cv::Mat newImg(IMG_H, IMG_W, CV_8UC3, cv::Vec3b(0,0,0));
-int partSize = 0;
-bool keepGoing = true;
-
 void* child(void *arg) {
-    // cv::Mat& img = newImg;
-
     pthread_mutex_lock(&mutex);
     while(1) {
       int part;
@@ -137,14 +149,29 @@ void* child(void *arg) {
       part = nextPart++;
       pthread_mutex_unlock(&mutex);
 
-      // printf("On travaille ! (%d)\n", part);
       for (int i = part * partSize; i < IMG_H * IMG_W && i < (part + 1) * partSize; i++) {
           int x = i % IMG_W;
           int y = i / IMG_W;
 
           int j = juliaDot(convert(x, y), maxIter);
-          cv::Vec3b color = hsv2bgr((j * 360) / 255, 1.0, 1.0);
-          newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
+          cv::Vec3b color;
+          switch (colorMode) {
+            case BLACK_AND_WHITE:
+              newImg.at<cv::Vec3b>(cv::Point(x, y)) = cv::Vec3b(j, j, j);
+              break;
+            case PALETTE1:
+              color = cv::Vec3b(palette[j*3], palette[j*3+1], palette[j*3+2]);
+              newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
+              break;
+            case PALETTE2:
+              color = cv::Vec3b(palette2[j*3], palette2[j*3+1], palette2[j*3+2]);
+              newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
+              break;
+            case HUE:
+            default:
+              color = hsv2bgr(((j * 360) / 255 + offsetColor) % 360, 1.0, 1.0);
+              newImg.at<cv::Vec3b>(cv::Point(x, y)) = color;
+          }
       }
     }
     pthread_mutex_unlock(&mutex);
@@ -157,6 +184,24 @@ int main(int argc, char * argv[]) {
     int v;
     float reel = -1.41702285618f;
     float imag = 0.0f;
+
+    printf("Usage: %s [Number of threads [Number of parts per thread [Initial real part [Initial imaginary part]]]]\n"
+      "- Number of threads: integer higher or equal to 1\n"
+      "- Number of parts per thread: integer higher or equal to 1\n"
+      "- Initial real part: float (real part of the complex number c used to compute the julia set)\n"
+      "- Initial imaginary part: float (imaginary part of the complex number c used to compute the julia set)\n", argv[0]);
+    printf("\n");
+    printf("Commands:\n"
+      "- LEFT and RIGHT arrows: move the camera horizontaly\n"
+      "- UP and DOWN arrows; move the camera verticaly\n"
+      "- r and f: decrease or increase the maximum number of iterations to compute the julia set\n"
+      "- z and s: increase or decrease the imaginary part of the complex number c used to compute the julia set\n"
+      "- d and q: increase or decrease the real part of the complex number c used to compute the julia set\n"
+      "- t and g: increase or decrease the hue offset (only works with the initial colore mode)\n"
+      "- e and a: zoom in or out\n"
+      "- SPACE: switch between multiple color modes\n"
+      "- w: save the current image\n"
+      "- q: quit\n");
 
     // Récupération des paramètres;
     if (argc > 1) {
@@ -230,6 +275,27 @@ int main(int argc, char * argv[]) {
           }
           else if (key == 'q') {
             c.real -= STEP;
+          }
+          else if (key == 't') {
+            offsetColor = (offsetColor + 1) % 360;
+          }
+          else if (key == 'g') {
+            offsetColor--;
+            while (offsetColor < 0)
+              offsetColor += 360;
+          }
+          else if (key == 'w') {
+            char name[100];
+            time_t timer;
+            struct tm* tm_info;
+            time(&timer);
+            tm_info = localtime(&timer);
+            strftime(name, 100, "img_julia_%Y%m%d_%H%M%S.bmp", tm_info);
+            imwrite(name, newImg);
+            printf("Image saved\n");
+          }
+          else if (key == 32) { // Space
+            colorMode = (color_mode_t) (((int) colorMode + 1) % (int) COLOR_MODES);
           }
           else if (key == 27) { // Escape
             keepGoing = false;
